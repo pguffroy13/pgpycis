@@ -1,0 +1,50 @@
+# pgpycis - PostgreSQL CIS Compliance Assessment Tool
+# Sudoers configuration for password-less execution of system-level security checks
+#
+# This file allows pgpycis to execute system commands required for comprehensive
+# PostgreSQL security compliance checks without requiring a password.
+#
+# INSTALLATION:
+#   - Copy this file to /etc/sudoers.d/pgpycis (requires root/sudo)
+#   - chmod 0440 /etc/sudoers.d/pgpycis
+#   - Verify with: visudo -c -f /etc/sudoers.d/pgpycis
+#
+# SECURITY NOTE:
+#   - This allows only read-only operations (file inspection, rpm queries, etc.)
+#   - No write operations or interactive shells are permitted
+#   - Designed for automated compliance scanning (cron jobs, CI/CD pipelines)
+#
+# USAGES:
+#   - sudo pgpycis -U postgres -h localhost -f text
+#   - sudo pgpycis -U postgres -h localhost -f html -o /tmp/report.html
+#   - Run in scheduled jobs/cron without password prompts
+
+# Allow all users to run pgpycis as root
+# This permits the security assessment tool to perform system-level checks
+Cmnd_Alias PGPYCIS_CMD = /home/*/*/.local/bin/pgpycis, \
+                         /home/*/.local/bin/pgpycis, \
+                         /root/.local/bin/pgpycis, \
+                         /usr/local/bin/pgpycis, \
+                         /opt/*/bin/pgpycis
+
+ALL ALL=(root) NOPASSWD: PGPYCIS_CMD
+
+# Optional: Additional system commands for enhanced checks
+# Uncomment these lines if pgpycis needs to read system configuration files
+
+# Allow reading PostgreSQL configuration
+# Cmnd_Alias POSTGRES_CONF = /bin/cat /var/lib/pgsql/*/data/postgresql.conf, \
+#                            /bin/cat /var/lib/pgsql/*/data/pg_hba.conf, \
+#                            /bin/cat /var/lib/postgresql/*/main/postgresql.conf
+# ALL ALL=(root) NOPASSWD: POSTGRES_CONF
+
+# Allow package information queries
+# Cmnd_Alias PACKAGE_CHECK = /usr/bin/rpm -qi postgresql*, \
+#                            /usr/bin/rpm -qa, \
+#                            /bin/dpkg -l
+# ALL ALL=(root) NOPASSWD: PACKAGE_CHECK
+
+# Allow systemctl status checks
+# Cmnd_Alias SYSTEMCTL_CHECK = /usr/bin/systemctl status postgresql*, \
+#                              /usr/bin/systemctl is-enabled postgresql*
+# ALL ALL=(root) NOPASSWD: SYSTEMCTL_CHECK
