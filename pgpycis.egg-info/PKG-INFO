@@ -1,0 +1,572 @@
+Metadata-Version: 2.4
+Name: pgpycis
+Version: 2.0
+Summary: PostgreSQL Database Security Assessment Tool (Python Version)
+Home-page: https://github.com/hexacluster/pgpycis
+Author: Gilles Darold
+License: GPL-3.0
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: System Administrators
+Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: System :: Systems Administration
+Classifier: Topic :: Database
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: psycopg2-binary>=2.9.0
+Requires-Dist: jinja2>=3.0.0
+Requires-Dist: click>=8.0.0
+Requires-Dist: pyyaml>=6.0
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# pgpycis - PostgreSQL CIS Compliance Assessment Tool
+
+A comprehensive security assessment tool for PostgreSQL that performs **100+ security checks** covering all recommendations from the [CIS PostgreSQL Benchmark](https://www.cisecurity.org/cis-benchmarks/).
+
+## Features
+
+- **100+ Security Checks** - All CIS PostgreSQL Benchmark controls
+  - 75 Python checks (database configuration & queries)
+  - 25+ Bash checks (system-level & file-based)
+- **Multi-Layer Architecture** - Python + Bash integration for comprehensive coverage
+- **Multiple Output Formats** - HTML & Text reports with detailed findings
+- **Multiple Languages** - English, French, Chinese
+- **Flexible Privilege Model** - Run as postgres user or root as needed
+- **No External Dependencies** - Embedded IP netmask calculation
+- **PostgreSQL 12-18 Support** - All modern PostgreSQL versions
+
+## Architecture
+
+pgpycis uses a **multi-layer privilege model**:
+
+```
+Mode 1: Standard User          Mode 2: With Sudo           Mode 3: As Root
+(Limited Coverage)             (Recommended)               (Full Coverage)
+
+  pgpycis (postgres)          sudo pgpycis               sudo -i / root shell
+  ├─ Python DB checks    ✓    ├─ Python DB checks  ✓    ├─ Python DB checks  ✓
+  └─ Bash system checks  ⚠️   └─ Bash system checks ✓    └─ Bash system checks ✓
+  (read-only, no config)       (with sudo)                (all system checks)
+```
+
+## Installation
+
+### Option 1: Standard Installation (Recommended)
+
+```bash
+# As regular user
+cd ~/DEV/pgpycis
+python3 -m pip install --user -e .
+
+# Verify installation
+pgpycis --version
+```
+
+### Option 2: System-wide Installation
+
+```bash
+# As root
+git clone <repo-url> /opt/pgpycis
+cd /opt/pgpycis
+python3 -m pip install -e .
+
+# Install sudoers configuration (optional, for password-less execution)
+sudo install -m 0440 pgpycis.sudoers /etc/sudoers.d/pgpycis
+```
+
+### Option 3: Container/CI Deployment
+
+```dockerfile
+# In Dockerfile
+RUN pip install psycopg2-binary click jinja2 pyyaml
+RUN mkdir -p /opt/pgpycis
+COPY . /opt/pgpycis/
+RUN cd /opt/pgpycis && pip install -e .
+
+# In docker-compose.yml, run as root for full checks
+CMD ["pgpycis", "-U", "postgres", "-h", "pg_server", "-f", "html"]
+```
+
+## Usage
+
+### Quick Start
+
+```bash
+# Basic report (text format)
+pgpycis -U postgres -h localhost
+
+# HTML report
+pgpycis -U postgres -h localhost -f html -o report.html
+
+# Specify custom database
+pgpycis -U admin -h 192.168.1.10 -p 5433 -d mydb
+
+# Specify PGDATA directory
+pgpycis -U postgres -h localhost -D /var/lib/pgsql/18/data
+```
+
+### With Elevated Privileges
+
+```bash
+# With sudo (requires password if sudoers not configured)
+sudo pgpycis -U postgres -h localhost -f text
+
+# With sudo (password-less if sudoers configured)
+sudo pgpycis -U postgres -h localhost -f html -o /tmp/report.html
+
+# As root shell
+sudo -i
+pgpycis -U postgres -h localhost -f text
+```
+
+### For Automated Scanning (Cron/CI)
+
+```bash
+# Cron job (daily compliance scan at 2 AM)
+0 2 * * * root /usr/local/bin/pgpycis -U postgres -h localhost -f html -o /var/reports/pgpycis-$(date +\%Y\%m\%d).html
+
+# GitLab CI
+check_postgresql_compliance:
+  stage: security
+  script:
+    - sudo pgpycis -U postgres -h postgres_server -f text | tee compliance.txt
+  artifacts:
+    paths:
+      - compliance.txt
+    expire_in: 30 days
+```
+
+## Security Configuration
+
+### Sudoers Setup (Optional - Recommended)
+
+For automated scanning without password prompts:
+
+```bash
+# As root user:
+sudo cp pgpycis.sudoers /etc/sudoers.d/pgpycis
+sudo chmod 0440 /etc/sudoers.d/pgpycis
+
+# Verify configuration
+sudo visudo -c -f /etc/sudoers.d/pgpycis
+
+# Now can run without password
+sudo pgpycis -U postgres -h localhost -f text
+```
+
+### Running as Root
+
+pgpycis can safely run as root:
+
+```bash
+sudo -i
+pgpycis -U postgres -h localhost -f text \
+  --output /var/reports/compliance.txt
+```
+
+The tool:
+- Connects to PostgreSQL with the specified user (e.g., `postgres`)
+- Executes system checks with root privileges
+- Never writes to PostgreSQL (read-only checks)
+- Never modifies system files (audit-only)
+
+### Database Connection
+
+The tool connects with the specified user credentials:
+
+```bash
+# Connect as 'postgres' user
+pgpycis -U postgres -h localhost
+
+# Connect as superuser with password
+pgpycis -U admin -h db.example.com -p 5432
+
+# Use .pgpass for credential storage
+cat ~/.pgpass
+# localhost:5432:postgres:postgres:password
+chmod 0600 ~/.pgpass
+
+pgpycis -U postgres -h localhost  # Password read from ~/.pgpass
+```
+
+## Command Line Options
+
+```
+Usage: pgpycis [OPTIONS]
+
+Options:
+  -U, --user TEXT              Database user (default: postgres)
+  -h, --host TEXT              Database host (default: localhost)
+  -p, --port INTEGER           Database port (default: 5432)
+  -d, --database TEXT          Database name (default: postgres)
+  -D, --pgdata PATH            PostgreSQL data directory (auto-detected)
+  -f, --format [text|html]     Output format (default: text)
+  -o, --output PATH            Output file (default: stdout)
+  -l, --language [en_US|fr_FR|zh_CN]  Language (default: en_US)
+  --version                    Show version
+  --help                        Show this help message
+```
+
+## Typical Execution Scenarios
+
+### Scenario 1: Network Admin Running Compliance Check
+
+```bash
+# Run on remote PostgreSQL instance
+echo "dbuser_password" | pgpycis \
+  -U dbadmin \
+  -h prod-pg-01.internal.net \
+  -p 5432 \
+  -f html \
+  -o /tmp/compliance_report.html
+
+# Email report to security team
+mail -s "PostgreSQL Compliance Report" security@example.com < /tmp/compliance_report.html
+```
+
+### Scenario 2: Scheduled Compliance Scanning
+
+```bash
+#!/bin/bash
+# /usr/local/bin/pgpycis-daily-scan.sh
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+REPORT_DIR="/var/reports/postgresql"
+REPORT_FILE="$REPORT_DIR/pgpycis_$TIMESTAMP.html"
+
+mkdir -p "$REPORT_DIR"
+
+sudo pgpycis \
+  -U postgres \
+  -h localhost \
+  -f html \
+  -o "$REPORT_FILE"
+
+# Rotate old reports
+find "$REPORT_DIR" -name "pgpycis_*.html" -mtime +30 -delete
+```
+
+Then add to crontab:
+```bash
+0 2 * * * /usr/local/bin/pgpycis-daily-scan.sh
+```
+
+### Scenario 3: CI/CD Pipeline
+
+```yaml
+# .gitlab-ci.yml
+postgresql_security_check:
+  stage: test
+  image: postgresql:15
+  services:
+    - name: postgres:15
+      variables:
+        POSTGRES_PASSWORD: testpass
+  before_script:
+    - apt-get update && apt-get install -y python3-pip
+    - pip install -e /builds/project/pgpycis
+  script:
+    - pgpycis -U postgres -h postgres -d postgres -f text | tee compliance.txt
+  artifacts:
+    paths:
+      - compliance.txt
+    reports:
+      dotenv: compliance.txt
+    expire_in: 30 days
+  allow_failure: true
+```
+
+### Scenario 4: Multiple Database Assessment
+
+```bash
+#!/bin/bash
+# Assess multiple PostgreSQL instances
+
+INSTANCES=(
+  "prod-pg-01:5432:dbadmin"
+  "prod-pg-02:5432:dbadmin"
+  "prod-pg-03:5433:dbadmin"
+  "staging-pg-01:5432:postgres"
+)
+
+REPORT_DIR="/var/reports/postgresql/$(date +%Y%m%d)"
+mkdir -p "$REPORT_DIR"
+
+for INSTANCE in "${INSTANCES[@]}"; do
+  IFS=':' read -r HOST PORT USER <<< "$INSTANCE"
+  REPORT_FILE="$REPORT_DIR/${HOST}_compliance.html"
+  
+  echo "Scanning $HOST:$PORT..."
+  sudo pgpycis \
+    -U "$USER" \
+    -h "$HOST" \
+    -p "$PORT" \
+    -f html \
+    -o "$REPORT_FILE"
+done
+
+echo "Reports saved to: $REPORT_DIR"
+```
+
+## Security Best Practices
+
+### ✅ DO:
+
+- **Use .pgpass** for password storage in automated scripts (chmod 0600)
+- **Enable sudoers configuration** for centralized privilege management
+- **Rotate reports** to prevent accumulation of sensitive data
+- **Restrict report access** - compliance reports contain security details
+- **Log execution** - track who ran which scans and when
+- **Use READ-ONLY database users** - pgpycis never modifies data
+- **Run in containers** - isolate scanning infrastructure
+- **Schedule during low-traffic periods** - minimize DB impact
+
+### ❌ DON'T:
+
+- Don't hardcode passwords in scripts (use .pgpass or .env files)
+- Don't commit reports to version control (they contain security findings)
+- Don't run as superuser when regular user access is sufficient
+- Don't share reports unencrypted
+- Don't ignore MANUAL checks - they require security review
+- Don't run simultaneously on same database (read-only but resource-intensive)
+
+### Security Privilege Levels
+
+#### Mode 1: Standard User (Most Restrictive)
+```bash
+# No sudo required
+pgpycis -U postgres -h localhost -f text
+
+# Checks performed:
+✓ PostgreSQL settings and configuration
+✓ Database user privileges
+✓ Extension status
+✗ System-level checks (requires permissions)
+✗ Configuration file parsing (requires root)
+```
+
+#### Mode 2: With Sudo (Recommended)
+```bash
+# Requires sudo password
+sudo pgpycis -U postgres -h localhost -f text
+
+# Checks performed:
+✓ PostgreSQL settings and configuration
+✓ Database user privileges
+✓ Extension status
+✓ System package verification
+✓ File permissions checking
+✓ Configuration file parsing
+```
+
+#### Mode 3: As Root (Full Coverage)
+```bash
+# Full privileges
+sudo -i
+pgpycis -U postgres -h localhost -f text
+
+# Checks performed:
+✓ ALL checks above, PLUS:
+✓ System-level security settings
+✓ PGDATA directory analysis
+✓ Partition verification
+✓ Advanced system checks
+```
+
+## Understanding the Report
+
+## Understanding the Report
+
+### Report Format
+
+```
+================================================================================
+PGPYCIS - PostgreSQL CIS Compliance Assessment Tool
+Report generated: 2026-03-31 09:15:23
+================================================================================
+
+# EXECUTIVE SUMMARY
+
+Total Checks: 100
+Passed: 18
+Failed: 7
+Warnings: 6
+Manual: 19
+
+# DETAILED ASSESSMENT
+
+## 1 - Installation and Patches
+
+  ✓ [1.4.3] Ensure Data Cluster checksums enabled => SUCCESS
+      Data checksums enabled on cluster
+
+  ✗ [1.3] Ensure systemd Service Files Enabled => FAILURE
+      PostgreSQL systemd service not enabled
+
+  ⚠ [1.1] Ensure packages from authorized repositories => WARNING
+      PostgreSQL installed but repository source not verified
+```
+
+### Check Status Meanings
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| **✓ SUCCESS** | Security requirement **MET** | No action needed |
+| **✗ FAILURE** | Security requirement **NOT MET** | Requires remediation |
+| **⚠ WARNING** | Potential security **CONCERN** | Review and consider action |
+| **📋 MANUAL** | Requires **HUMAN REVIEW** | Verify manually or via database |
+| **ℹ INFO** | **INFORMATIONAL** | Reference information |
+
+### Interpreting Results
+
+1. **Passed Checks**: These controls are properly configured ✓
+2. **Failed Checks**: Require immediate attention for compliance  
+3. **Warnings**: Review and determine if action is needed
+4. **Manual Checks**: Require security team verification or database-specific configuration
+
+## Requirements
+
+- **Python**: 3.8+
+- **PostgreSQL**: 12.0+
+- **System Access**: 
+  - `postgres` user for database access (read-only)
+  - Optional: `root` or `sudo` for extended system checks
+
+## Dependencies
+
+```
+psycopg2-binary>=2.9.0        # PostgreSQL client
+click>=8.0.0                  # CLI framework
+jinja2>=3.0.0                 # Template engine
+pyyaml>=6.0                   # YAML support
+```
+
+Automatically installed via `pip install -e .`
+
+## Development
+
+### Running from Source
+
+```bash
+git clone <repo-url>
+cd pgpycis
+python3 -m pip install --user -e .
+```
+
+### Running Tests
+
+```bash
+# Test basic functionality
+python3 -m pytest tests/ -v
+
+# Test with specific PostgreSQL version
+docker-compose -f tests/docker-compose.yml up
+python3 -m pytest tests/ -v
+```
+
+### Project Structure
+
+```
+pgpycis/
+├── pgpycis/                    # Main package
+│   ├── cli.py                  # CLI interface (Click)
+│   ├── core.py                 # Main engine
+│   ├── labels.py               # Check definitions (95+)
+│   ├── messages.py             # Error messages
+│   ├── netmask.py              # IP validation
+│   ├── report.py               # Report generation
+│   └── checks/
+│       ├── all_checks.py       # All 95+ checks implementation
+│       ├── bash_checks.sh      # System-level bash checks
+│       └── bash_runner.py      # Bash integration
+├── setup.py                    # Package configuration
+├── requirements.txt            # Dependencies
+├── README.md                   # This file
+├── IMPLEMENTATION.md           # Architecture details
+├── BASH_CHECKS_INTEGRATION.md  # Bash integration guide
+├── pgpycis.sudoers             # Sudoers configuration
+└── deploy.sh                   # Deployment helper script
+```
+
+## Known Limitations
+
+- Manual database checks (role privileges, RLS policies) cannot be fully automated
+- Some system-level checks require elevated privileges
+- Config file access requires appropriate file permissions
+- Performance depends on database size (large databases may take longer)
+
+## Troubleshooting
+
+### "Permission denied" errors
+
+These typically occur when running as non-root user:
+- Try: `sudo pgpycis -U postgres -h localhost`
+- Or configure sudoers: `sudo install -m 0440 pgpycis.sudoers /etc/sudoers.d/pgpycis`
+
+### Database connection errors
+
+```bash
+# Verify connectivity first
+psql -U postgres -h localhost -c "SELECT version();"
+
+# Then try pgpycis with verbose output
+pgpycis -U postgres -h localhost -f text 2>&1 | head -30
+```
+
+### JSON parsing errors
+
+If you see JSON parsing errors from bash checks:
+- Verify bash_checks.sh is executable: `chmod +x pgpycis/checks/bash_checks.sh`
+- Test directly: `bash pgpycis/checks/bash_checks.sh`
+
+## Contributing
+
+To contribute improvements:
+
+1. Review current checks in `pgpycis/checks/all_checks.py`
+2. Add new checks or enhance existing ones
+3. Update labels in `pgpycis/labels.py`
+4. Test with multiple PostgreSQL versions
+5. Submit pull request with documentation
+
+## References
+
+- [CIS PostgreSQL Benchmark](https://www.cisecurity.org/cis-benchmarks/)
+- [PostgreSQL Security Documentation](https://www.postgresql.org/docs/current/sql-syntax.html)
+- [PostgreSQL Configuration Reference](https://www.postgresql.org/docs/current/config-setting.html)
+
+## License
+
+GNU General Public License v3 (GPLv3)
+
+See LICENSE file for details.
+
+## Support & Documentation
+
+- **Main Documentation**: See [IMPLEMENTATION.md](IMPLEMENTATION.md)
+- **Bash Integration**: See [BASH_CHECKS_INTEGRATION.md](BASH_CHECKS_INTEGRATION.md)  
+- **Deployment Help**: Run `bash deploy.sh`
+
+## Version History
+
+- **v2.0** (Mar 2026) - Python port with Bash integration, 100+ checks
+- **v1.0** (Original) - Perl version (pgdsat)
+
+---
+
+**pgpycis v2.0** | PostgreSQL CIS Benchmark Assessment Tool  
+**Status**: Production Ready | **Coverage**: 100+ checks | **Last Updated**: March 2026
